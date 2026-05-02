@@ -193,9 +193,20 @@ func TestBuildResolvedBodyExpandsMultiSelect(t *testing.T) {
 	}
 }
 
-func TestBuildActionsBlockReturnsNilForFreeText(t *testing.T) {
-	if b := buildActionsBlock(gatewaysdk.HumanInputRecord{ToolCallID: "tc"}); b != nil {
-		t.Errorf("free-text question (no choices) must produce no actions block, got %T", b)
+func TestBuildBlocksFreeTextHasNoInteractiveBlock(t *testing.T) {
+	blocks := buildBlocks(gatewaysdk.HumanInputRecord{
+		ToolCallID: "tc",
+		Question:   "What do you think?",
+	})
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block (section only), got %d", len(blocks))
+	}
+	section, ok := blocks[0].(*slack.SectionBlock)
+	if !ok {
+		t.Fatalf("expected SectionBlock, got %T", blocks[0])
+	}
+	if section.Accessory != nil {
+		t.Errorf("free-text section should have no accessory, got %+v", section.Accessory)
 	}
 }
 
@@ -223,24 +234,27 @@ func TestBuildBlocksSingleSelectUsesButtons(t *testing.T) {
 	}
 }
 
-func TestBuildBlocksMultiSelectUsesMultiStaticSelect(t *testing.T) {
+// Multi-select must ride as a section accessory — Slack returns
+// invalid_blocks if a multi_static_select element appears inside an
+// actions block.
+func TestBuildBlocksMultiSelectIsSectionAccessory(t *testing.T) {
 	blocks := buildBlocks(gatewaysdk.HumanInputRecord{
 		ToolCallID:  "tc-1",
 		Question:    "Pick any.",
 		Choices:     []string{"A", "B", "C"},
 		MultiSelect: true,
 	})
-	if len(blocks) != 2 {
-		t.Fatalf("expected 2 blocks (section + actions), got %d", len(blocks))
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block (section with accessory), got %d", len(blocks))
 	}
-	actions := blocks[1].(*slack.ActionBlock)
-	if len(actions.Elements.ElementSet) != 1 {
-		t.Fatalf("expected 1 select element, got %d", len(actions.Elements.ElementSet))
-	}
-	menu, ok := actions.Elements.ElementSet[0].(*slack.MultiSelectBlockElement)
+	section, ok := blocks[0].(*slack.SectionBlock)
 	if !ok {
-		t.Fatalf("expected MultiSelectBlockElement, got %T", actions.Elements.ElementSet[0])
+		t.Fatalf("expected SectionBlock, got %T", blocks[0])
 	}
+	if section.Accessory == nil || section.Accessory.MultiSelectElement == nil {
+		t.Fatalf("expected multi-select accessory, got %+v", section.Accessory)
+	}
+	menu := section.Accessory.MultiSelectElement
 	if menu.Type != slack.MultiOptTypeStatic {
 		t.Errorf("expected static multi-select, got %v", menu.Type)
 	}
@@ -267,16 +281,15 @@ func TestBuildButtonsBlockCapsAt25Buttons(t *testing.T) {
 	}
 }
 
-func TestBuildSelectMenuTruncatesLongChoices(t *testing.T) {
+func TestBuildMultiSelectTruncatesLongChoices(t *testing.T) {
 	long := strings.Repeat("a", 200)
-	block := buildSelectMenuBlock(gatewaysdk.HumanInputRecord{
+	menu := buildMultiSelect(gatewaysdk.HumanInputRecord{
 		ToolCallID:  "tc",
 		Choices:     []string{long},
 		MultiSelect: true,
 	})
-	menu := block.(*slack.ActionBlock).Elements.ElementSet[0].(*slack.MultiSelectBlockElement)
 	if len(menu.Options[0].Text.Text) > maxSelectOptionText {
-		t.Errorf("select-menu option label %d bytes; Slack caps at %d",
+		t.Errorf("multi-select option label %d bytes; Slack caps at %d",
 			len(menu.Options[0].Text.Text), maxSelectOptionText)
 	}
 }

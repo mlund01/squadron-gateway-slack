@@ -35,6 +35,7 @@ func (g *slackGateway) runSocketEvents(ctx context.Context) {
 			case socketmode.EventTypeEventsAPI:
 				eapi, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
+					log.Printf("events-api evt arrived but Data was %T", evt.Data)
 					continue
 				}
 				if evt.Request != nil {
@@ -129,8 +130,12 @@ func (g *slackGateway) handleMessage(ctx context.Context, msg *slackevents.Messa
 	if msg == nil {
 		return
 	}
-	// Skip bot messages, edits, and any non-thread message — only
-	// treat human replies inside the question's thread as answers.
+	// Drop bot messages, edits, and channel mismatches silently — these
+	// fire on every channel the bot is a member of and would flood the
+	// log. Only thread replies in our channel that don't match a
+	// tracked question get a diagnostic line, since that's the rare
+	// case where an operator's reply silently does nothing and they'll
+	// want to know why.
 	if msg.SubType != "" {
 		return
 	}
@@ -146,8 +151,10 @@ func (g *slackGateway) handleMessage(ctx context.Context, msg *slackevents.Messa
 
 	g.mu.Lock()
 	matched := lookupToolCallByMessageTS(g.messages, msg.ThreadTimeStamp)
+	known := len(g.messages)
 	g.mu.Unlock()
 	if matched == "" {
+		log.Printf("thread reply on ts=%s did not match any tracked question (%d open) — likely a reply on a question posted before this gateway started", msg.ThreadTimeStamp, known)
 		return
 	}
 

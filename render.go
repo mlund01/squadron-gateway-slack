@@ -19,15 +19,25 @@ func buildFallbackText(rec gatewaysdk.HumanInputRecord) string {
 
 // buildBlocks renders the message body + interactive picker as Block
 // Kit blocks. Returned slice is ready to pass to MsgOptionBlocks.
+//
+// Layout depends on picker shape:
+//   - free-text → one section block with the body
+//   - single-choice → section block + actions block of buttons
+//   - multi-select → section block whose accessory is the multi_static_select
+//     element (Slack rejects multi-selects inside actions blocks; they're
+//     only valid as section accessories or in input blocks).
 func buildBlocks(rec gatewaysdk.HumanInputRecord) []slack.Block {
-	blocks := []slack.Block{
-		slack.NewSectionBlock(
-			slack.NewTextBlockObject(slack.MarkdownType, buildMessageBody(rec), false, false),
-			nil, nil,
-		),
+	bodyText := slack.NewTextBlockObject(slack.MarkdownType, buildMessageBody(rec), false, false)
+
+	if rec.MultiSelect && len(rec.Choices) > 0 {
+		return []slack.Block{
+			slack.NewSectionBlock(bodyText, nil, slack.NewAccessory(buildMultiSelect(rec))),
+		}
 	}
-	if actions := buildActionsBlock(rec); actions != nil {
-		blocks = append(blocks, actions)
+
+	blocks := []slack.Block{slack.NewSectionBlock(bodyText, nil, nil)}
+	if len(rec.Choices) > 0 {
+		blocks = append(blocks, buildButtonsBlock(rec))
 	}
 	return blocks
 }
@@ -102,20 +112,6 @@ func formatResolvedResponse(rec gatewaysdk.HumanInputRecord) string {
 	return strings.Join(picks, ", ")
 }
 
-// buildActionsBlock picks the picker shape:
-//   - no choices → no actions block (free-text via thread reply)
-//   - multi_select → ActionsBlock containing one MultiStaticSelect
-//   - else → ActionsBlock of buttons
-func buildActionsBlock(rec gatewaysdk.HumanInputRecord) slack.Block {
-	if len(rec.Choices) == 0 {
-		return nil
-	}
-	if rec.MultiSelect {
-		return buildSelectMenuBlock(rec)
-	}
-	return buildButtonsBlock(rec)
-}
-
 // Slack Block Kit limits.
 const (
 	maxActionElements   = 25 // elements per ActionsBlock
@@ -140,7 +136,10 @@ func buildButtonsBlock(rec gatewaysdk.HumanInputRecord) slack.Block {
 	return slack.NewActionBlock("sq-actions-"+rec.ToolCallID, elements...)
 }
 
-func buildSelectMenuBlock(rec gatewaysdk.HumanInputRecord) slack.Block {
+// buildMultiSelect builds the multi_static_select element used as a
+// section accessory for multi-select questions. Slack rejects this
+// element type inside actions blocks (see buildBlocks for layout).
+func buildMultiSelect(rec gatewaysdk.HumanInputRecord) *slack.MultiSelectBlockElement {
 	options := make([]*slack.OptionBlockObject, 0, len(rec.Choices))
 	for i, choice := range rec.Choices {
 		if i >= maxActionElements {
@@ -153,13 +152,12 @@ func buildSelectMenuBlock(rec gatewaysdk.HumanInputRecord) slack.Block {
 			nil,
 		))
 	}
-	menu := slack.NewOptionsMultiSelectBlockElement(
+	return slack.NewOptionsMultiSelectBlockElement(
 		slack.MultiOptTypeStatic,
 		slack.NewTextBlockObject(slack.PlainTextType, "Pick one or more…", false, false),
 		encodeSelectMenuCustomID(rec.ToolCallID),
 		options...,
 	)
-	return slack.NewActionBlock("sq-actions-"+rec.ToolCallID, menu)
 }
 
 // displayResponder substitutes a generic label when no responder id
