@@ -124,6 +124,10 @@ func (g *slackGateway) OnHumanInputResolved(ctx context.Context, rec gatewaysdk.
 	return g.markResolved(ctx, rec)
 }
 
+func (g *slackGateway) OnNotification(ctx context.Context, rec gatewaysdk.NotificationRecord) error {
+	return g.postNotification(ctx, rec)
+}
+
 func (g *slackGateway) Shutdown(ctx context.Context) error {
 	if g.cancel != nil {
 		g.cancel()
