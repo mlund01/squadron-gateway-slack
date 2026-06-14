@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"path"
 	"strings"
 
 	gatewaysdk "github.com/mlund01/squadron-gateway-sdk"
@@ -73,9 +78,40 @@ func (g *slackGateway) postNotification(ctx context.Context, rec gatewaysdk.Noti
 	return nil
 }
 
-// postText posts a free-form message, honoring an optional channel override
-// (falling back to the configured default channel). Backs builtins.gateway.post.
-func (g *slackGateway) postText(ctx context.Context, channelOverride, text string) error {
+// slackPostDescription + slackPostSchema are advertised to squadron via
+// MessageToolSpec so the LLM knows how to format a Slack post.
+const slackPostDescription = "Post a message to the Slack channel. " +
+	"`text` is the message body and supports Slack mrkdwn (*bold*, _italics_, `code`, > quotes, <url|label> links). " +
+	"`channel` optionally overrides the destination — a channel name (with or without a leading #) or id. " +
+	"`blocks` is an optional Slack Block Kit array (raw JSON) for rich layout. " +
+	"`attachments` is an optional array of URLs to fetch and upload as files."
+
+const slackPostSchema = `{
+  "type": "object",
+  "properties": {
+    "text": {"type": "string", "description": "Message body (Slack mrkdwn supported)."},
+    "channel": {"type": "string", "description": "Optional channel name or id override."},
+    "blocks": {"type": "array", "description": "Optional Slack Block Kit blocks (raw JSON).", "items": {"type": "object"}},
+    "attachments": {"type": "array", "items": {"type": "string"}, "description": "URLs to fetch and upload as files."}
+  },
+  "required": ["text"]
+}`
+
+type slackPostPayload struct {
+	Text        string          `json:"text"`
+	Channel     string          `json:"channel,omitempty"`
+	Blocks      json.RawMessage `json:"blocks,omitempty"`
+	Attachments []string        `json:"attachments,omitempty"`
+}
+
+// postMessage renders a builtins.gateway.post payload (text + mrkdwn, Block
+// Kit blocks, fetched URL attachments) and posts it, honoring an optional
+// channel override (falling back to the configured default channel).
+func (g *slackGateway) postMessage(ctx context.Context, payload string) error {
+	var p slackPostPayload
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return fmt.Errorf("parse message payload: %w", err)
+	}
 	g.mu.Lock()
 	client := g.client
 	channel := g.channelID
@@ -83,13 +119,59 @@ func (g *slackGateway) postText(ctx context.Context, channelOverride, text strin
 	if client == nil {
 		return fmt.Errorf("slack client not initialized")
 	}
-	if channelOverride != "" {
-		channel = g.resolveNotifyChannel(ctx, client, channelOverride, channel)
+	if p.Channel != "" {
+		channel = g.resolveNotifyChannel(ctx, client, p.Channel, channel)
 	}
-	if _, _, err := client.PostMessageContext(ctx, channel, slack.MsgOptionText(text, false)); err != nil {
+
+	opts := []slack.MsgOption{slack.MsgOptionText(p.Text, false)}
+	if len(p.Blocks) > 0 {
+		var b slack.Blocks
+		if err := json.Unmarshal([]byte(`{"blocks":`+string(p.Blocks)+`}`), &b); err == nil {
+			opts = append(opts, slack.MsgOptionBlocks(b.BlockSet...))
+		} else {
+			log.Printf("slack blocks parse: %v", err)
+		}
+	}
+	if _, _, err := client.PostMessageContext(ctx, channel, opts...); err != nil {
 		return fmt.Errorf("post message: %w", err)
 	}
+
+	for _, url := range p.Attachments {
+		g.uploadAttachment(ctx, client, channel, url)
+	}
 	return nil
+}
+
+// uploadAttachment downloads a URL (capped at 25 MB) and uploads it to the
+// channel. Best-effort: a failed attachment is logged, not fatal.
+func (g *slackGateway) uploadAttachment(ctx context.Context, client *slack.Client, channel, url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("attachment %q: %v", url, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("attachment %q: status %d", url, resp.StatusCode)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 25<<20))
+	if err != nil {
+		log.Printf("attachment %q: %v", url, err)
+		return
+	}
+	name := path.Base(resp.Request.URL.Path)
+	if name == "" || name == "." || name == "/" {
+		name = "attachment"
+	}
+	if _, err := client.UploadFileV2Context(ctx, slack.UploadFileV2Parameters{
+		Reader:   bytes.NewReader(data),
+		FileSize: len(data),
+		Filename: name,
+		Channel:  channel,
+	}); err != nil {
+		log.Printf("attachment %q upload: %v", url, err)
+	}
 }
 
 // resolveNotifyChannel turns a per-mission channel override into a channel ID.

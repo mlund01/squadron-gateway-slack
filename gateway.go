@@ -129,7 +129,14 @@ func (g *slackGateway) OnNotification(ctx context.Context, rec gatewaysdk.Notifi
 }
 
 func (g *slackGateway) PostMessage(ctx context.Context, req gatewaysdk.PostMessageRequest) error {
-	return g.postText(ctx, req.Channel, req.Text)
+	return g.postMessage(ctx, req.Payload)
+}
+
+func (g *slackGateway) MessageToolSpec(ctx context.Context) (gatewaysdk.MessageToolSpec, error) {
+	return gatewaysdk.MessageToolSpec{
+		Description:  slackPostDescription,
+		ParamsSchema: slackPostSchema,
+	}, nil
 }
 
 func (g *slackGateway) Shutdown(ctx context.Context) error {
