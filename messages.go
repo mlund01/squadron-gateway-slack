@@ -73,6 +73,25 @@ func (g *slackGateway) postNotification(ctx context.Context, rec gatewaysdk.Noti
 	return nil
 }
 
+// postText posts a free-form message, honoring an optional channel override
+// (falling back to the configured default channel). Backs builtins.gateway.post.
+func (g *slackGateway) postText(ctx context.Context, channelOverride, text string) error {
+	g.mu.Lock()
+	client := g.client
+	channel := g.channelID
+	g.mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("slack client not initialized")
+	}
+	if channelOverride != "" {
+		channel = g.resolveNotifyChannel(ctx, client, channelOverride, channel)
+	}
+	if _, _, err := client.PostMessageContext(ctx, channel, slack.MsgOptionText(text, false)); err != nil {
+		return fmt.Errorf("post message: %w", err)
+	}
+	return nil
+}
+
 // resolveNotifyChannel turns a per-mission channel override into a channel ID.
 // A '#'-prefixed or name-shaped override is resolved by name; a Slack
 // channel-ID-shaped override is used as-is. On failure it logs and falls back

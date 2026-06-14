@@ -128,6 +128,10 @@ func (g *slackGateway) OnNotification(ctx context.Context, rec gatewaysdk.Notifi
 	return g.postNotification(ctx, rec)
 }
 
+func (g *slackGateway) PostMessage(ctx context.Context, req gatewaysdk.PostMessageRequest) error {
+	return g.postText(ctx, req.Channel, req.Text)
+}
+
 func (g *slackGateway) Shutdown(ctx context.Context) error {
 	if g.cancel != nil {
 		g.cancel()
