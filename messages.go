@@ -126,7 +126,7 @@ func (g *slackGateway) postMessage(ctx context.Context, payload string) error {
 	opts := []slack.MsgOption{slack.MsgOptionText(p.Text, false)}
 	if len(p.Blocks) > 0 {
 		var b slack.Blocks
-		if err := json.Unmarshal([]byte(`{"blocks":`+string(p.Blocks)+`}`), &b); err == nil {
+		if err := json.Unmarshal(p.Blocks, &b); err == nil {
 			opts = append(opts, slack.MsgOptionBlocks(b.BlockSet...))
 		} else {
 			log.Printf("slack blocks parse: %v", err)
