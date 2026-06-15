@@ -3,7 +3,7 @@ module github.com/mlund01/squadron-gateway-slack
 go 1.23.0
 
 require (
-	github.com/mlund01/squadron-gateway-sdk v0.0.1
+	github.com/mlund01/squadron-gateway-sdk v0.0.2
 	github.com/slack-go/slack v0.15.0
 )
 
