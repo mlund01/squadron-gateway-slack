@@ -5,10 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"path"
 	"strings"
 
 	gatewaysdk "github.com/mlund01/squadron-gateway-sdk"
@@ -90,8 +87,7 @@ const slackPostDescription = "Post a message to the Slack channel. " +
 	"`context` = {\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":\"...\"}]}; " +
 	"`image` = {\"type\":\"image\",\"image_url\":\"https://...\",\"alt_text\":\"...\"}; " +
 	"`actions` = {\"type\":\"actions\",\"elements\":[{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"...\"},\"url\":\"https://...\"}]}. " +
-	"When `blocks` is set it drives the layout and `text` is used as the notification/preview fallback. " +
-	"`attachments` is an optional array of URLs to fetch and upload as files."
+	"When `blocks` is set it drives the layout and `text` is used as the notification/preview fallback."
 
 const slackPostSchema = `{
   "type": "object",
@@ -102,23 +98,21 @@ const slackPostSchema = `{
       "type": "array",
       "description": "Optional Slack Block Kit blocks for rich layout. Each item is a block object with a 'type'. Common types: header, section (text or fields), divider, context, image, actions (buttons). Example: [{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\"Deploy\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"*v2* shipped to prod\"}},{\"type\":\"divider\"},{\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":\"3m 12s\"}]}]",
       "items": {"type": "object"}
-    },
-    "attachments": {"type": "array", "items": {"type": "string"}, "description": "URLs to fetch and upload as files."}
+    }
   },
   "required": ["text"]
 }`
 
 type slackPostPayload struct {
-	Text        string          `json:"text"`
-	Channel     string          `json:"channel,omitempty"`
-	Blocks      json.RawMessage `json:"blocks,omitempty"`
-	Attachments []string        `json:"attachments,omitempty"`
+	Text    string          `json:"text"`
+	Channel string          `json:"channel,omitempty"`
+	Blocks  json.RawMessage `json:"blocks,omitempty"`
 }
 
 // postMessage renders a builtins.gateway.post payload (text + mrkdwn, Block
-// Kit blocks, fetched URL attachments) and posts it, honoring an optional
-// channel override (falling back to the configured default channel).
-func (g *slackGateway) postMessage(ctx context.Context, payload string) error {
+// Kit blocks) plus squadron-supplied file attachments and posts it, honoring
+// an optional channel override (falling back to the configured default channel).
+func (g *slackGateway) postMessage(ctx context.Context, payload string, attachments []gatewaysdk.FileAttachment) error {
 	var p slackPostPayload
 	if err := json.Unmarshal([]byte(payload), &p); err != nil {
 		return fmt.Errorf("parse message payload: %w", err)
@@ -147,43 +141,27 @@ func (g *slackGateway) postMessage(ctx context.Context, payload string) error {
 		return fmt.Errorf("post message: %w", err)
 	}
 
-	for _, url := range p.Attachments {
-		g.uploadAttachment(ctx, client, channel, url)
+	for _, a := range attachments {
+		g.uploadAttachment(ctx, client, channel, a)
 	}
 	return nil
 }
 
-// uploadAttachment fetches an agent-supplied URL (from the post payload's
-// `attachments`; squadron does not host or proxy it) and re-uploads the bytes
-// to Slack so they appear as a native file. Capped at 25 MB. Best-effort: a
-// failed attachment is logged, not fatal.
-func (g *slackGateway) uploadAttachment(ctx context.Context, client *slack.Client, channel, url string) {
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Printf("attachment %q: %v", url, err)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("attachment %q: status %d", url, resp.StatusCode)
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 25<<20))
-	if err != nil {
-		log.Printf("attachment %q: %v", url, err)
-		return
-	}
-	name := path.Base(resp.Request.URL.Path)
-	if name == "" || name == "." || name == "/" {
+// uploadAttachment uploads a squadron-supplied file (already read from the
+// mission's memory/scratchpad and shipped as raw bytes) to Slack so it appears
+// as a native file. Best-effort: a failed attachment is logged, not fatal.
+func (g *slackGateway) uploadAttachment(ctx context.Context, client *slack.Client, channel string, a gatewaysdk.FileAttachment) {
+	name := a.Filename
+	if name == "" {
 		name = "attachment"
 	}
 	if _, err := client.UploadFileV2Context(ctx, slack.UploadFileV2Parameters{
-		Reader:   bytes.NewReader(data),
-		FileSize: len(data),
+		Reader:   bytes.NewReader(a.Content),
+		FileSize: len(a.Content),
 		Filename: name,
 		Channel:  channel,
 	}); err != nil {
-		log.Printf("attachment %q upload: %v", url, err)
+		log.Printf("attachment %q upload: %v", name, err)
 	}
 }
 

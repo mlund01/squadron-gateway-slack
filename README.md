@@ -43,7 +43,7 @@ public URL.
    - `groups:history` — read private-channel thread replies (skip if you only post to public channels)
    - `channels:read` — only needed if you'll use `channel_name` instead of `channel_id`
    - `groups:read` — same, for private channels
-   - `files:write` — **only needed if agents will attach files** via the `builtins.gateway.post` tool's `attachments` (the gateway fetches each URL and uploads it). Skip it if you don't use attachments.
+   - `files:write` — **only needed if agents will attach files** via the `builtins.gateway.post` tool's `attachments` (squadron reads the referenced memory/scratchpad file and the gateway uploads it). Skip it if you don't use attachments.
 
 2. Scroll up → **Install to Workspace** → **Allow**.
 3. After install, the page shows a **Bot User OAuth Token** (starts

@@ -11,14 +11,15 @@ import (
 
 // TestPostPayloadParsing pins the JSON contract the LLM produces against
 // the Go struct postMessage decodes. A renamed/dropped json tag here means
-// the agent's text, channel, blocks, or attachments silently never reach
-// Slack — so every field of a full payload must survive the unmarshal.
+// the agent's text, channel, or blocks silently never reach Slack — so every
+// field of a full payload must survive the unmarshal. Attachments are NOT part
+// of the payload: squadron resolves local files and ships them as
+// PostMessageRequest.Attachments bytes, so they never appear in this JSON.
 func TestPostPayloadParsing(t *testing.T) {
 	raw := `{
 		"text": "deploy done",
 		"channel": "#ops",
-		"blocks": [{"type":"section","text":{"type":"mrkdwn","text":"*hi*"}}],
-		"attachments": ["https://example.com/a.png"]
+		"blocks": [{"type":"section","text":{"type":"mrkdwn","text":"*hi*"}}]
 	}`
 
 	var p slackPostPayload
@@ -33,9 +34,6 @@ func TestPostPayloadParsing(t *testing.T) {
 	}
 	if len(p.Blocks) == 0 {
 		t.Error("Blocks should be preserved as raw JSON")
-	}
-	if len(p.Attachments) != 1 || p.Attachments[0] != "https://example.com/a.png" {
-		t.Errorf("Attachments: got %v", p.Attachments)
 	}
 }
 
@@ -67,7 +65,7 @@ func TestPostPayloadTextOnly(t *testing.T) {
 	if p.Text != "hi" {
 		t.Errorf("Text: got %q", p.Text)
 	}
-	if p.Channel != "" || len(p.Blocks) != 0 || len(p.Attachments) != 0 {
+	if p.Channel != "" || len(p.Blocks) != 0 {
 		t.Errorf("optional fields should be empty: %+v", p)
 	}
 }
