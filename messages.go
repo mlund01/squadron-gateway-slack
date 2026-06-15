@@ -83,15 +83,26 @@ func (g *slackGateway) postNotification(ctx context.Context, rec gatewaysdk.Noti
 const slackPostDescription = "Post a message to the Slack channel. " +
 	"`text` is the message body and supports Slack mrkdwn (*bold*, _italics_, `code`, > quotes, <url|label> links). " +
 	"`channel` optionally overrides the destination — a channel name (with or without a leading #) or id. " +
-	"`blocks` is an optional Slack Block Kit array (raw JSON) for rich layout. " +
+	"`blocks` is an optional Slack Block Kit array for rich layout; each element is a block object with a `type`. Common types: " +
+	"`header` = {\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\"...\"}}; " +
+	"`section` = {\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"...\"}} (or use \"fields\":[{\"type\":\"mrkdwn\",\"text\":\"...\"}] for a two-column grid); " +
+	"`divider` = {\"type\":\"divider\"}; " +
+	"`context` = {\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":\"...\"}]}; " +
+	"`image` = {\"type\":\"image\",\"image_url\":\"https://...\",\"alt_text\":\"...\"}; " +
+	"`actions` = {\"type\":\"actions\",\"elements\":[{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"...\"},\"url\":\"https://...\"}]}. " +
+	"When `blocks` is set it drives the layout and `text` is used as the notification/preview fallback. " +
 	"`attachments` is an optional array of URLs to fetch and upload as files."
 
 const slackPostSchema = `{
   "type": "object",
   "properties": {
-    "text": {"type": "string", "description": "Message body (Slack mrkdwn supported)."},
+    "text": {"type": "string", "description": "Message body (Slack mrkdwn supported). When blocks are set, this is the notification/preview fallback."},
     "channel": {"type": "string", "description": "Optional channel name or id override."},
-    "blocks": {"type": "array", "description": "Optional Slack Block Kit blocks (raw JSON).", "items": {"type": "object"}},
+    "blocks": {
+      "type": "array",
+      "description": "Optional Slack Block Kit blocks for rich layout. Each item is a block object with a 'type'. Common types: header, section (text or fields), divider, context, image, actions (buttons). Example: [{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\"Deploy\"}},{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"*v2* shipped to prod\"}},{\"type\":\"divider\"},{\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":\"3m 12s\"}]}]",
+      "items": {"type": "object"}
+    },
     "attachments": {"type": "array", "items": {"type": "string"}, "description": "URLs to fetch and upload as files."}
   },
   "required": ["text"]
@@ -142,8 +153,10 @@ func (g *slackGateway) postMessage(ctx context.Context, payload string) error {
 	return nil
 }
 
-// uploadAttachment downloads a URL (capped at 25 MB) and uploads it to the
-// channel. Best-effort: a failed attachment is logged, not fatal.
+// uploadAttachment fetches an agent-supplied URL (from the post payload's
+// `attachments`; squadron does not host or proxy it) and re-uploads the bytes
+// to Slack so they appear as a native file. Capped at 25 MB. Best-effort: a
+// failed attachment is logged, not fatal.
 func (g *slackGateway) uploadAttachment(ctx context.Context, client *slack.Client, channel, url string) {
 	resp, err := http.Get(url)
 	if err != nil {
