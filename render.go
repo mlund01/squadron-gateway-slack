@@ -182,3 +182,38 @@ func truncate(s string, max int) string {
 	}
 	return s[:max-len(ellipsis)] + ellipsis
 }
+
+// notifyEmoji picks a leading glyph for the notification by event.
+func notifyEmoji(event string) string {
+	switch event {
+	case "mission_completed":
+		return "✅"
+	case "mission_failed":
+		return "❌"
+	default:
+		return "🔔"
+	}
+}
+
+// buildNotificationBody renders a one-way mission-lifecycle notification.
+func buildNotificationBody(rec gatewaysdk.NotificationRecord) string {
+	var b strings.Builder
+	b.WriteString(notifyEmoji(rec.Event))
+	b.WriteString(" *")
+	if rec.Title != "" {
+		b.WriteString(rec.Title)
+	} else {
+		b.WriteString(rec.Event)
+	}
+	b.WriteString("*")
+	if rec.Message != "" {
+		b.WriteString("\n")
+		b.WriteString(rec.Message)
+	}
+	if rec.Error != "" {
+		b.WriteString("\n```\n")
+		b.WriteString(truncate(rec.Error, 2000))
+		b.WriteString("\n```")
+	}
+	return b.String()
+}

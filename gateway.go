@@ -124,6 +124,21 @@ func (g *slackGateway) OnHumanInputResolved(ctx context.Context, rec gatewaysdk.
 	return g.markResolved(ctx, rec)
 }
 
+func (g *slackGateway) OnNotification(ctx context.Context, rec gatewaysdk.NotificationRecord) error {
+	return g.postNotification(ctx, rec)
+}
+
+func (g *slackGateway) PostMessage(ctx context.Context, req gatewaysdk.PostMessageRequest) error {
+	return g.postMessage(ctx, req.Payload, req.Attachments)
+}
+
+func (g *slackGateway) MessageToolSpec(ctx context.Context) (gatewaysdk.MessageToolSpec, error) {
+	return gatewaysdk.MessageToolSpec{
+		Description:  slackPostDescription,
+		ParamsSchema: slackPostSchema,
+	}, nil
+}
+
 func (g *slackGateway) Shutdown(ctx context.Context) error {
 	if g.cancel != nil {
 		g.cancel()
