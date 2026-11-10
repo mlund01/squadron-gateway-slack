@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.46.0
-	github.com/mlund01/squadron-gateway-sdk v0.0.3
+	github.com/mlund01/squadron-gateway-sdk v0.0.4
 	github.com/slack-go/slack v0.15.0
 )
 
@@ -29,5 +29,3 @@ require (
 	google.golang.org/grpc v1.70.0 // indirect
 	google.golang.org/protobuf v1.36.4 // indirect
 )
-
-replace github.com/mlund01/squadron-gateway-sdk => github.com/FedTax/squadron-gateway-sdk v0.0.0-20261027194028-b0ed0f7c42fc
